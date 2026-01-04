@@ -10,7 +10,7 @@ This project collects recent news articles from various sources (Google News, Ti
 
 ### Prerequisites
 - Docker and Docker Compose
-- Python 3.x with `uv` package manager
+- Python 3.11+ with `uv` package manager
 
 ### Setup
 
@@ -25,11 +25,26 @@ This project collects recent news articles from various sources (Google News, Ti
    uv run python scripts/init_db.py
    ```
 
-3. **Run the scrapers:**
+3. **Run the complete pipeline:**
    ```bash
-   # Fetch articles from the last 10 hours
+   # Step 1: Scrape articles from the last 10 hours
    uv run python scripts/ingest_once.py 10
+
+   # Step 2: Extract content from scraped articles
+   uv run python scripts/extract_once.py 10 80
+
+   # Step 3: Check results
+   uv run python scripts/analyze_extractions.py 10
    ```
+
+### Testing & Daily Workflow
+
+See **[TESTING_AND_WORKFLOW.md](TESTING_AND_WORKFLOW.md)** for:
+- Complete testing guide
+- Database verification commands
+- Daily workflow options
+- Troubleshooting common issues
+- SQL queries for inspecting data
 
 ## Project Structure
 
@@ -211,9 +226,66 @@ uv run python scripts/ingest_once.py 10
 
 ---
 
+## Phase 2: Content Extraction ✅ (Completed)
+
+**Objective:** Extract full article text from URLs with robust error handling.
+
+**Status:** ✅ **Working!** Successfully extracting ~75% of articles from enabled sources.
+
+### Results
+
+**Success Metrics:**
+- **Overall Success Rate:** 73% (58 articles extracted from 79 scraped)
+- **Times of India:** 100% success (25/25 articles)
+- **Anthropic Blog:** 100% success (10/10 articles)
+- **The Verge:** 100% success (10/10 articles)
+- **TechCrunch:** 100% success (4/4 articles)
+- **Hacker News Links:** ~60% success (9/16 articles)
+
+### How It Works
+
+**For Cloudflare-Protected Sites** (Times of India, Anthropic, The Verge, TechCrunch):
+1. Detect Cloudflare protection
+2. Use `cloudscraper` library to bypass protection (mimics Chrome browser)
+3. Extract article text with Trafilatura
+4. Save to database with `extraction_status = "ok"`
+
+**For Standard Sites** (Hacker News links, BBC, GitHub, etc.):
+1. Fetch HTML with browser-like headers
+2. Extract article text with Trafilatura
+3. Retry with exponential backoff if fails (3 attempts)
+4. Save to database
+
+### Quick Commands
+
+```bash
+# Analyze extraction success/failure rates
+uv run python scripts/analyze_extractions.py 24
+
+# Extract content from articles (last 24 hours, batch size 50)
+uv run python scripts/extract_once.py 24 50
+
+# Check extracted content in database
+uv run python scripts/check_db_content.py 24
+```
+
+### Key Features
+- ✅ Cloudscraper integration for Cloudflare bypass
+- ✅ Browser-like headers to avoid bot detection
+- ✅ Retry mechanism with exponential backoff (3 attempts)
+- ✅ Detailed logging of every extraction attempt
+- ✅ Domain-level success/failure analytics
+- ✅ Google News scraper disabled (redirect URLs don't work)
+
+### Documentation
+- 📘 [docs/EXTRACTION_STATUS_REPORT.md](docs/EXTRACTION_STATUS_REPORT.md) - Complete technical breakdown
+- 📘 [docs/QUICK_STATUS.md](docs/QUICK_STATUS.md) - Visual summary
+- 📘 [docs/EXTRACTION_FIXES.md](docs/EXTRACTION_FIXES.md) - Usage guide
+
+---
+
 ## Next Steps
 
-- **Phase 2: Text Extraction** - Extract full article content from URLs
 - **Phase 3: Ranking** - Score and select top articles for the digest
 - **Phase 4: Summarization** - Use LLMs to generate article summaries
 - **Phase 5: Email Delivery** - Send daily digest emails

@@ -5,7 +5,8 @@ Simple script to run scrapers with customizable time window
 import sys
 from typing import List, Dict
 
-from app.scrapers.googlenews import GoogleNewsScraper
+# Google News scraper disabled - produces redirect URLs that fail extraction (0% success rate)
+# from app.scrapers.googlenews import GoogleNewsScraper
 from app.scrapers.timesofindia import TimesOfIndiaScraper
 from app.scrapers.techblogs import TechBlogScraper
 
@@ -26,13 +27,17 @@ def run(hours: int = 10) -> List[Dict]:
 
     Returns:
         List of article dictionaries from all scrapers
+
+    Note: Google News scraper is disabled because it returns redirect URLs
+    (e.g., https://news.google.com/rss/articles/CBM...) that cannot be
+    extracted. We get better coverage from direct sources anyway.
     """
-    google_scraper = GoogleNewsScraper(hours_limit=hours)
+    # google_scraper = GoogleNewsScraper(hours_limit=hours)  # DISABLED
     toi_scraper = TimesOfIndiaScraper(hours_limit=hours)
     tech_scraper = TechBlogScraper(hours_limit=hours)
 
     all_articles = []
-    all_articles.extend(google_scraper.get_last_24h_articles())
+    # all_articles.extend(google_scraper.get_last_24h_articles())  # DISABLED
     all_articles.extend(toi_scraper.get_last_24h_articles())
     all_articles.extend(tech_scraper.get_last_24h_articles())
     return all_articles

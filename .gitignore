@@ -5,7 +5,44 @@ build/
 dist/
 wheels/
 *.egg-info
+
+# Environment files
 .env
+.env.local
+.env.*.local
 
 # Virtual environments
 .venv
+venv/
+ENV/
+
+# IDE files
+.vscode/
+docs/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Database files (optional - uncomment if you don't want to commit DB)
+# *.db
+# *.sqlite
+# *.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Test output
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+tmp/
+temp/
+*.tmp

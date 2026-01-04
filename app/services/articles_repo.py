@@ -35,7 +35,7 @@ def upsert_articles(items: List[Dict]) -> List[int]:
             "url": url,
             "category": it.get("category"),
             "published_at": _to_dt(it.get("published_at") or it.get("published_time")),
-            "scraped_at": it.get("scraped_at") or now,
+            "scraped_at": now,
         }
 
         # keep the latest scraped_at version if the same url appears again
