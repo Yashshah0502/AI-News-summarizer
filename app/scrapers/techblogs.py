@@ -33,9 +33,9 @@ class TechBlogScraper:
                 'type': 'web'
             },
             'openai': {
-                'name': 'OpenAI Blog',
-                'url': 'https://openai.com/blog',
-                'type': 'web'
+                'name': 'OpenAI',
+                'url': 'https://openai.com/news/rss.xml',
+                'type': 'rss'
             },
             'techcrunch_ai': {
                 'name': 'TechCrunch AI',
@@ -167,52 +167,11 @@ class TechBlogScraper:
             return []
 
     def scrape_openai(self) -> List[Dict]:
-        """Scrape OpenAI blog"""
-        articles = []
+        """Scrape OpenAI via official News RSS (avoids /blog 403)."""
         try:
-            url = 'https://openai.com/blog'
-            response = requests.get(url, headers=self.headers, timeout=10)
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.content, 'html.parser')
-
-            # Find article links
-            article_elements = soup.find_all('a', href=re.compile(r'/blog/'))
-
-            for element in article_elements[:10]:
-                try:
-                    title = element.get_text(strip=True)
-                    link = element.get('href', '')
-
-                    if link and not link.startswith('http'):
-                        link = 'https://openai.com' + link
-
-                    if title and link and len(title) > 10:
-                        articles.append({
-                            'title': title,
-                            'link': link,
-                            'source': 'OpenAI',
-                            'category': 'tech_blog',
-                            'published_time': '',
-                            'scraped_at': datetime.now().isoformat()
-                        })
-
-                except Exception as e:
-                    continue
-
-            # Remove duplicates
-            seen_links = set()
-            unique_articles = []
-            for article in articles:
-                if article['link'] not in seen_links:
-                    seen_links.add(article['link'])
-                    unique_articles.append(article)
-
-            print(f"✓ Scraped {len(unique_articles)} articles from OpenAI - last {self.hours_limit}h")
-            return unique_articles
-
+            return self.scrape_rss_feed('OpenAI', self.blogs['openai']['url'])
         except Exception as e:
-            print(f"✗ Error scraping OpenAI: {str(e)}")
+            print(f"✗ Error scraping OpenAI (RSS): {str(e)}")
             return []
 
     def scrape_hackernews(self) -> List[Dict]:
