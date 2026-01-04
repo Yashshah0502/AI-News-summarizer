@@ -35,3 +35,17 @@ Example: if Google News returns `https://example.com/story` at 9:30 and again at
 
 [1]: https://www.postgresql.org/docs/current/ddl-constraints.html?utm_source=chatgpt.com "Documentation: 18: 5.5. Constraints"
 [2]: https://docs.sqlalchemy.org/en/latest/core/connections.html?utm_source=chatgpt.com "Working with Engines and Connections"
+
+
+### phase 1 Step 3
+Step 3 takes the articles scrapers return and saves them into the `articles` table so later phases can extract text, rank, summarize, and email reliably.
+We created the `articles` table to store one row per news story (title, source, URL, scraped time), and we made `url` UNIQUE so the database enforces “no duplicates.” ([PostgreSQL][1])
+“Dedup” means if the same URL appears again (from another source or another run), we don’t create a second row; we update the existing row using Postgres UPSERT (`ON CONFLICT DO UPDATE`). ([PostgreSQL][1])
+We also dedupe the batch *before* inserting because the same URL can appear twice in one scrape run, and a single INSERT can’t update the same target row twice.
+`database.py` exists so every part of the app uses one consistent DB connection/session setup (scrapers, LangGraph nodes, cleanup). ([Database Administrators Stack Exchange][2])
+Example: Google News returns URL=A, TechBlogs also returns URL=A; batch-dedupe keeps one, and UPSERT ensures only one DB row exists for A. ([PostgreSQL][1])
+Non-tech explanation: “We save all news links in a small database and keep only one copy of each link so you don’t get repeated stories in your email.”
+This step is the “foundation” because everything next reads from the DB: extraction fills `content_text`, ranking picks top items, LLM writes summaries, and retention deletes old rows.
+
+[1]: https://www.postgresql.org/docs/current/sql-insert.html?utm_source=chatgpt.com "Documentation: 18: INSERT"
+[2]: https://dba.stackexchange.com/questions/315039/insert-on-conflict-do-update-set-an-upsert-statement-with-a-unique-constraint?utm_source=chatgpt.com "INSERT ON CONFLICT DO UPDATE SET (an UPSERT) ..."

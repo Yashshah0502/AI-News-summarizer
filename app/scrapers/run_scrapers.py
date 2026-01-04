@@ -3,9 +3,11 @@ Simple script to run scrapers with customizable time window
 """
 
 import sys
-from googlenews import GoogleNewsScraper
-from timesofindia import TimesOfIndiaScraper
-from techblogs import TechBlogScraper
+from typing import List, Dict
+
+from app.scrapers.googlenews import GoogleNewsScraper
+from app.scrapers.timesofindia import TimesOfIndiaScraper
+from app.scrapers.techblogs import TechBlogScraper
 
 
 def print_banner(text):
@@ -13,6 +15,27 @@ def print_banner(text):
     print("\n" + "="*80)
     print(f"  {text}")
     print("="*80 + "\n")
+
+
+def run(hours: int = 10) -> List[Dict]:
+    """
+    Run all scrapers and return collected articles.
+
+    Args:
+        hours: Number of hours to look back for articles (default: 10)
+
+    Returns:
+        List of article dictionaries from all scrapers
+    """
+    google_scraper = GoogleNewsScraper(hours_limit=hours)
+    toi_scraper = TimesOfIndiaScraper(hours_limit=hours)
+    tech_scraper = TechBlogScraper(hours_limit=hours)
+
+    all_articles = []
+    all_articles.extend(google_scraper.get_last_24h_articles())
+    all_articles.extend(toi_scraper.get_last_24h_articles())
+    all_articles.extend(tech_scraper.get_last_24h_articles())
+    return all_articles
 
 
 def main():
@@ -31,36 +54,13 @@ def main():
 
     print_banner(f"NEWS SCRAPERS - LAST {hours} HOURS")
 
-    # Initialize scrapers with custom time window
-    google_scraper = GoogleNewsScraper(hours_limit=hours)
-    toi_scraper = TimesOfIndiaScraper(hours_limit=hours)
-    tech_scraper = TechBlogScraper(hours_limit=hours)
-
-    # Collect all articles
-    all_articles = []
-
-    print(f"\n1️⃣  Google News (last {hours} hours)")
-    print("-" * 80)
-    google_articles = google_scraper.get_last_24h_articles()
-    all_articles.extend(google_articles)
-
-    print(f"\n2️⃣  Times of India (last {hours} hours)")
-    print("-" * 80)
-    toi_articles = toi_scraper.get_last_24h_articles()
-    all_articles.extend(toi_articles)
-
-    print(f"\n3️⃣  Tech Blogs (last {hours} hours)")
-    print("-" * 80)
-    tech_articles = tech_scraper.get_last_24h_articles()
-    all_articles.extend(tech_articles)
+    # Run all scrapers and collect articles
+    all_articles = run(hours)
 
     # Summary
     print_banner("FINAL SUMMARY")
     print(f"Time Window: Last {hours} hours")
     print(f"Total Articles: {len(all_articles)}")
-    print(f"  - Google News: {len(google_articles)} articles")
-    print(f"  - Times of India: {len(toi_articles)} articles")
-    print(f"  - Tech Blogs: {len(tech_articles)} articles")
 
     # Show some sample articles
     print(f"\n📰 Sample Recent Articles:")
