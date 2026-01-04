@@ -36,16 +36,6 @@ This project collects recent news articles from various sources (Google News, Ti
    # Step 3: Check results
    uv run python scripts/analyze_extractions.py 10
    ```
-
-### Testing & Daily Workflow
-
-See **[TESTING_AND_WORKFLOW.md](TESTING_AND_WORKFLOW.md)** for:
-- Complete testing guide
-- Database verification commands
-- Daily workflow options
-- Troubleshooting common issues
-- SQL queries for inspecting data
-
 ## Project Structure
 
 ```
@@ -277,23 +267,61 @@ uv run python scripts/check_db_content.py 24
 - ✅ Domain-level success/failure analytics
 - ✅ Google News scraper disabled (redirect URLs don't work)
 
-### Documentation
-- 📘 [docs/EXTRACTION_STATUS_REPORT.md](docs/EXTRACTION_STATUS_REPORT.md) - Complete technical breakdown
-- 📘 [docs/QUICK_STATUS.md](docs/QUICK_STATUS.md) - Visual summary
-- 📘 [docs/EXTRACTION_FIXES.md](docs/EXTRACTION_FIXES.md) - Usage guide
+
+## Phase 3: Ranking & Selection (Next)
+
+**Objective:** Score and select top 10 articles for summarization using diversity-aware ranking.
+
+### Approach: Diversity-Aware Re-Ranking
+
+After extraction, we need to select which articles are worth summarizing and emailing. The approach:
+
+1. **Scoring** - Score each article using simple signals:
+   - Recency (newer = higher score)
+   - Keyword boosts (AI, ML, LLM, etc.)
+   - Source importance
+   - Content length
+
+2. **Classification** - Classify articles into topic buckets:
+   - Technology
+   - Finance/Business
+   - World/Politics
+   - Other
+
+3. **Top-N per Source** - Shortlist Top 5 articles per source to avoid source bias
+
+4. **Deduplication** - Remove near-identical headlines using similarity matching
+
+5. **Topic Mix Enforcement** - Ensure balanced coverage:
+   - Prevent "all tech" digests on heavy tech-news days
+   - Balance: Tech + Finance + World
+   - Backfill with best remaining if bucket is weak
+
+6. **Final Top 10** - Select final 10 articles for summarization
+
+### Why This Approach?
+
+**Problem:** Without selection, you'd either:
+- (a) Send too many stories (overwhelming)
+- (b) Waste LLM time summarizing low-value/duplicate items
+
+**Solution:** Diversity-aware re-ranking
+- First rank by relevance (recency, keywords, source)
+- Then re-rank to avoid repetition and increase topic coverage
+- Same approach used in search/recommendation systems
+
+**Non-Technical Explanation:**
+> "I collect many news links, then use simple rules to pick the 10 most important and recent stories, while making sure you get a balanced set (some tech, some finance, some world news) and not 10 versions of the same headline. Then we summarize those 10 and email them."
+
+### References
+- [Diversity-Aware Ranking (OHARS)](https://ceur-ws.org/Vol-2758/OHARS-paper5.pdf)
+- [Relevance vs Diversity in Ranking (ArXiv)](https://arxiv.org/pdf/2204.00539)
 
 ---
 
 ## Next Steps
 
-- **Phase 3: Ranking** - Score and select top articles for the digest
 - **Phase 4: Summarization** - Use LLMs to generate article summaries
 - **Phase 5: Email Delivery** - Send daily digest emails
 - **Phase 6: Automation** - Schedule daily runs with cron/scheduler
 - **Phase 7: Cleanup** - Delete articles older than 18 hours
-
----
-
-## License
-
-MIT
