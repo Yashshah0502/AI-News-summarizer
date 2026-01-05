@@ -28,13 +28,13 @@ This project collects recent news articles from various sources (Google News, Ti
 3. **Run the complete pipeline:**
    ```bash
    # Step 1: Scrape articles from the last 10 hours
-   uv run python scripts/ingest_once.py 10
+   uv run python -m scripts.ingest_once 10
 
    # Step 2: Extract content from scraped articles
-   uv run python scripts/extract_once.py 10 80
+   uv run python -m scripts.extract_once 10 80
 
    # Step 3: Check results
-   uv run python scripts/analyze_extractions.py 10
+   uv run python -m scripts.analyze_extractions 10
    ```
 ## Project Structure
 
