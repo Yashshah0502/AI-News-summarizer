@@ -27,7 +27,7 @@ class TimesOfIndiaScraper:
         }
         self.categories = {
             'top_stories': '/home/headlines',
-            'technology': '/business/india-business/tech',
+            'technology': '/technology/tech-news',
             'business': '/business',
             'politics': '/india'
         }

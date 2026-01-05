@@ -1,5 +1,5 @@
 # app/graph/state.py
-from typing import TypedDict, List, Dict
+from typing import TypedDict, List, Dict, Any
 
 class NewsState(TypedDict, total=False):
     window_hours: int
@@ -8,3 +8,5 @@ class NewsState(TypedDict, total=False):
     extracted_attempted: int
     extraction_stats: Dict[str, int]
     selected_ids: List[int]
+    summaries: Dict[int, Dict[str, Any]]
+    digest_id: int

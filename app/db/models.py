@@ -26,6 +26,8 @@ class Article(Base):
 
     content_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     extraction_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    extraction_attempts: Mapped[int] = mapped_column(default=0, nullable=False, server_default="0")
+    next_extract_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     importance_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     reason_selected: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 

@@ -140,9 +140,14 @@ def extract_article_text(
 
     for attempt in range(max_retries):
         try:
-            # For Cloudflare-protected domains, try cloudscraper first
-            if domain in CLOUDFLARE_PROTECTED_DOMAINS and attempt == 0:
-                logger.info(f"Trying cloudscraper for {domain}")
+            # Try cloudscraper first for known Cloudflare domains or on final attempt
+            should_try_cloudscraper = (
+                (domain in CLOUDFLARE_PROTECTED_DOMAINS and attempt == 0) or
+                (attempt == max_retries - 1)  # Last resort fallback
+            )
+
+            if should_try_cloudscraper:
+                logger.info(f"Trying cloudscraper for {domain} (attempt {attempt + 1})")
                 html, status = try_cloudscraper_fetch(url, timeout)
                 if html:
                     fetch_method = "cloudscraper"

@@ -216,11 +216,11 @@ uv run python scripts/ingest_once.py 10
 
 ---
 
-## Phase 2: Content Extraction ✅ (Completed)
+## Phase 2: Content Extraction (Completed)
 
 **Objective:** Extract full article text from URLs with robust error handling.
 
-**Status:** ✅ **Working!** Successfully extracting ~75% of articles from enabled sources.
+**Status:** **Working!** Successfully extracting ~75% of articles from enabled sources.
 
 ### Results
 
@@ -260,12 +260,12 @@ uv run python scripts/check_db_content.py 24
 ```
 
 ### Key Features
-- ✅ Cloudscraper integration for Cloudflare bypass
-- ✅ Browser-like headers to avoid bot detection
-- ✅ Retry mechanism with exponential backoff (3 attempts)
-- ✅ Detailed logging of every extraction attempt
-- ✅ Domain-level success/failure analytics
-- ✅ Google News scraper disabled (redirect URLs don't work)
+- Cloudscraper integration for Cloudflare bypass
+- Browser-like headers to avoid bot detection
+- Retry mechanism with exponential backoff (3 attempts)
+- Detailed logging of every extraction attempt
+- Domain-level success/failure analytics
+- Google News scraper disabled (redirect URLs don't work)
 
 
 ## Phase 3: Ranking & Selection (Next)
@@ -319,9 +319,309 @@ After extraction, we need to select which articles are worth summarizing and ema
 
 ---
 
-## Next Steps
+## Phase 4: LangGraph Pipeline Integration (Completed)
 
-- **Phase 4: Summarization** - Use LLMs to generate article summaries
-- **Phase 5: Email Delivery** - Send daily digest emails
-- **Phase 6: Automation** - Schedule daily runs with cron/scheduler
-- **Phase 7: Cleanup** - Delete articles older than 18 hours
+### Step 6: Building the State Graph
+
+**Objective:** Transform individual scripts into a unified workflow graph that manages state and enables observability.
+
+**What Changed:**
+Instead of running 3 separate scripts manually:
+```bash
+uv run python scripts/ingest_once.py 10
+uv run python scripts/extract_once.py 10 80
+uv run python scripts/select_top.py 10
+```
+
+We now run a single command:
+```bash
+uv run python scripts/run_graph.py 10
+```
+
+**How It Works:**
+
+1. **State Management** ([`app/graph/state.py`](app/graph/state.py))
+   - Defines `NewsState` TypedDict with all pipeline data
+   - State flows through the graph like a clipboard passed between workers
+   - Each node reads current state and returns updates (patches)
+   - Schema prevents typos and documents what data exists
+
+2. **Graph Construction** ([`app/graph/build_graph.py`](app/graph/build_graph.py))
+   - Each pipeline step becomes a **node** (function)
+   - **Edges** define execution order (ingest → extract → select)
+   - `StateGraph(NewsState)` enforces type safety
+   - `compile()` produces a runnable application
+
+3. **Checkpointing & Persistence**
+   - `InMemorySaver()` saves state snapshots at each step
+   - Enables debugging: see exactly what happened at each node
+   - Enables time-travel: replay or resume from any checkpoint
+   - Grouped by `thread_id` for run isolation
+
+**Graph Flow:**
+```
+START → ingest_node → extract_node → select_node → END
+         (scrape)      (extract)       (rank)
+```
+
+Each node:
+- Receives current state
+- Performs its task
+- Returns state updates (e.g., `{"article_ids": [1,2,3]}`)
+- Graph merges updates automatically
+
+**Why This Matters:**
+
+| Manual Scripts | LangGraph Pipeline |
+|----------------|-------------------|
+| Run 3 commands sequentially | Run 1 command |
+| No visibility between steps | Full state snapshots |
+| Hard to debug failures | See exactly where it failed |
+| Can't resume | Can resume from checkpoint |
+| No audit trail | Complete execution history |
+
+**Analogy:**
+> "Built an assembly line: the **graph** is the flowchart, the **state** is the clipboard that moves with each item, and **checkpoints** are saved progress so we don't restart from zero if something breaks."
+
+**References:**
+- [LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
+- [LangGraph Time-Travel](https://docs.langchain.com/oss/python/langgraph/use-time-travel)
+
+---
+
+### Step 7: LLM-Powered Summarization & Digest Generation (Completed)
+
+**Objective:** Add AI-powered summarization and persist digests to the database using OpenAI API with structured output.
+
+**What We Built:**
+
+#### 1. Summarization Service ([`app/services/summarizer.py`](app/services/summarizer.py))
+
+Uses OpenAI's API with **structured output** to generate consistent summaries:
+
+```python
+class ArticleSummary(BaseModel):
+    one_liner: str     # Single sentence summary
+    bullets: list[str] # 3 key bullet points
+```
+
+**Why Structured Output?**
+- Guarantees consistent format (always 1 one-liner + 3 bullets)
+- Type-safe: Pydantic validates the response
+- No need to parse messy text with regex
+
+**Implementation Details:**
+- Model: `gpt-4o-mini` (fast and cost-effective)
+- Temperature: 0.3 (consistent but not robotic)
+- Input: Article title + full content text
+- Output: Validated `ArticleSummary` object
+
+**Error Handling:**
+- Network failures: Automatic retry with exponential backoff
+- Rate limits: Respects OpenAI rate limit headers
+- Invalid responses: Pydantic validation catches schema mismatches
+- Empty content: Gracefully handles articles with no text
+
+#### 2. Digest Repository ([`app/services/digest_repo.py`](app/services/digest_repo.py))
+
+Manages digest creation and storage:
+
+**Functions:**
+- `create_digest(hours)` - Creates new digest record with time window
+- `add_items(digest_id, items)` - Links articles to digest with summaries
+- `fetch_articles(ids)` - Retrieves articles from database
+
+**Database Schema:**
+```sql
+digests (id, window_start, window_end, created_at)
+  ↓ (1-to-many)
+digest_items (digest_id, article_id, rank, item_summary)
+```
+
+#### 3. Updated Graph Pipeline
+
+**New Nodes:**
+```python
+def summarize_node(state):
+    # Fetch selected articles from DB
+    # Generate summaries using OpenAI
+    # Return summaries dict: {article_id: summary}
+
+def persist_digest_node(state):
+    # Create new digest in DB
+    # Link articles with their summaries
+    # Return digest_id
+```
+
+**Complete Graph Flow:**
+```
+START
+  ↓
+ingest_node (scrape articles)
+  ↓
+extract_node (extract content with retry logic)
+  ↓
+select_node (rank & pick top 10)
+  ↓
+summarize_node (LLM generates summaries)
+  ↓
+persist_digest_node (save to database)
+  ↓
+END
+```
+
+**Updated State Schema:**
+```python
+class NewsState(TypedDict, total=False):
+    window_hours: int
+    article_ids: List[int]
+    selected_ids: List[int]
+    summaries: Dict[int, Dict[str, Any]]  # NEW
+    digest_id: int                         # NEW
+```
+
+#### 4. Challenges & Solutions
+
+**Challenge 1: Infinite Extraction Retry Loop**
+
+ **Problem:** Articles failing extraction were retried infinitely, spamming logs:
+```
+✗ Failed: Trafilatura extraction failed for wol.fm
+✗ Failed: Trafilatura extraction failed for wol.fm
+✗ Failed: Trafilatura extraction failed for wol.fm
+... (forever)
+```
+
+**Solution:** Implemented retry logic with exponential backoff
+- Added columns: `extraction_attempts`, `next_extract_at`
+- Max 3 attempts per article
+- Backoff delays: 5 min → 30 min
+- After 3 failures: permanently mark as `failed`
+
+**Code Changes:**
+```python
+# app/services/extract_repo.py
+if article.extraction_attempts < MAX_EXTRACTION_ATTEMPTS:
+    backoff_minutes = 5 * (6 ** (article.extraction_attempts - 1))
+    article.next_extract_at = now + timedelta(minutes=backoff_minutes)
+else:
+    article.extraction_status = "failed"  # Give up
+```
+
+**Challenge 2: Some Domains Always Fail**
+
+ **Problem:** Certain domains (radio sites, minimal blogs, 403 errors) always fail extraction
+
+**Solution:** Created domain skiplist
+```python
+SKIP_DOMAINS = {
+    "wol.fm",           # Radio/audio content
+    "bostondynamics.com", # JS-heavy
+    "retool.com",       # 403 forbidden
+    "twitter.com",      # Social media
+}
+```
+Articles from these domains are marked as `skipped` immediately.
+
+**Challenge 3: Cloudscraper Not Used as Fallback**
+
+ **Problem:** Logs showed `method: requests` even for sites that need Cloudscraper
+
+**Solution:** Always try Cloudscraper on final retry attempt
+```python
+should_try_cloudscraper = (
+    (domain in CLOUDFLARE_PROTECTED_DOMAINS and attempt == 0) or
+    (attempt == max_retries - 1)  # Last resort fallback
+)
+```
+
+**Challenge 4: Missing State Fields**
+
+ **Error:**
+```
+KeyError: 'summaries'
+During task with name 'persist_digest' and id '...'
+```
+
+**Solution:** Added missing fields to `NewsState` TypedDict
+```python
+summaries: Dict[int, Dict[str, Any]]
+digest_id: int
+```
+
+**Challenge 5: Times of India Technology 404**
+
+ **Problem:** URL `/business/india-business/tech` returned 404
+
+**Solution:** Updated to correct URL
+```python
+'technology': '/technology/tech-news'  # Fixed
+```
+
+#### 5. Final Results
+
+**Example Graph Run:**
+```bash
+uv run python scripts/run_graph.py 10
+```
+
+**Output:**
+```
+✓ Scraped 84 articles (45 from TOI, 39 from Tech Blogs)
+✓ Extracted content from 122 articles (38.9% success rate)
+✓ Selected 10 top articles
+✓ Generated 10 summaries via OpenAI
+✓ Created digest #3 with all items
+
+Final State:
+{
+  'window_hours': 10,
+  'raw_count': 84,
+  'article_ids': [910, 911, ...],
+  'selected_ids': [119, 120, 125, ...],
+  'summaries': {
+    910: {
+      'one_liner': 'AI-driven tech investments could trigger inflation...',
+      'bullets': ['...', '...', '...']
+    },
+    ...
+  },
+  'digest_id': 3
+}
+```
+
+**Database State:**
+```sql
+SELECT COUNT(*) FROM digests;        -- 3 digests created
+SELECT COUNT(*) FROM digest_items;   -- 30 articles summarized (10 per digest)
+SELECT COUNT(*) FROM articles WHERE extraction_status = 'ok';  -- 122 successful
+```
+
+#### 6. Monitoring & Maintenance
+
+**Check Extraction Status:**
+```bash
+uv run python scripts/check_extraction_status.py
+```
+
+**Cleanup Failed Attempts:**
+```bash
+uv run python scripts/cleanup_and_migrate.py
+```
+
+**View Retry Queue:**
+```sql
+SELECT url, extraction_attempts, next_extract_at
+FROM articles
+WHERE next_extract_at IS NOT NULL
+ORDER BY next_extract_at;
+```
+
+**References:**
+- [LangChain Structured Output](https://docs.langchain.com/oss/python/langchain/structured-output)
+- [LangChain OpenAI Integration](https://docs.langchain.com/oss/python/integrations/chat/openai)
+- [SQLAlchemy ORM Quickstart](https://docs.sqlalchemy.org/en/20/orm/quickstart.html)
+- [LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
+- [Exponential Backoff Best Practices](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/)
+
+---
