@@ -632,3 +632,6 @@ Step 8
 Concept: generate a multipart email that has plain text + HTML so every email client can render it (HTML if possible, text fallback). 
 Implementation: read digests + digest_items from Postgres, build a subject like News Digest (Last 10 Hours) and a body where each item is: Title + Source + Link + 2–4 bullets.
 https://docs.python.org/3/library/email.examples.html
+
+Step 8.2: Send the email (SMTP)
+https://support.google.com/mail/answer/185833?hl=en
