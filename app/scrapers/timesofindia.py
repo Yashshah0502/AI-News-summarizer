@@ -199,7 +199,7 @@ class TimesOfIndiaScraper:
 
 def main():
     """Test function to run the scraper"""
-    print("🚀 Starting Times of India Scraper...\n")
+    print("Starting Times of India Scraper...\n")
 
     scraper = TimesOfIndiaScraper()
     articles = scraper.get_last_24h_articles()

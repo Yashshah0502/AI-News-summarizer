@@ -30,7 +30,7 @@ def run(hours: int = 10) -> List[Dict]:
 
     Note: Google News scraper is disabled because it returns redirect URLs
     (e.g., https://news.google.com/rss/articles/CBM...) that cannot be
-    extracted. We get better coverage from direct sources anyway.
+    extracted. We get better coverage from direct sources anyway....
     """
     # google_scraper = GoogleNewsScraper(hours_limit=hours)  # DISABLED
     toi_scraper = TimesOfIndiaScraper(hours_limit=hours)
@@ -68,7 +68,7 @@ def main():
     print(f"Total Articles: {len(all_articles)}")
 
     # Show some sample articles
-    print(f"\n📰 Sample Recent Articles:")
+    print(f"\n Sample Recent Articles:")
     for i, article in enumerate(all_articles[:10], 1):
         print(f"\n{i}. {article['title'][:70]}...")
         print(f"   Source: {article['source']}")
