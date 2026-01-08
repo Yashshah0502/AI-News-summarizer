@@ -54,7 +54,8 @@ def render_digest(digest_id: int) -> Tuple[str, str, str]:
 
     if d.overall_summary:
         parts.append("<h3>Overall</h3>")
-        parts.append(f"<p>{escape(d.overall_summary).replace('\\n','<br>')}</p>")
+        overall_html = escape(d.overall_summary).replace("\n", "<br>")
+        parts.append(f"<p>{overall_html}</p>")
 
     parts.append("<h3>Top stories</h3><ol>")
     for rank, title, url, source, item_summary in rows:
@@ -64,7 +65,8 @@ def render_digest(digest_id: int) -> Tuple[str, str, str]:
         )
         if item_summary:
             # render newlines as <br> (simple + safe)
-            parts.append(f"<div style='margin-top:6px'>{escape(item_summary).replace('\\n','<br>')}</div>")
+            item_html = escape(item_summary).replace("\n", "<br>")
+            parts.append(f"<div style='margin-top:6px'>{item_html}</div>")
         parts.append("</li>")
     parts.append("</ol>")
 
