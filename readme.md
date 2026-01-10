@@ -1,650 +1,662 @@
 # AI News Summarizer
 
-An automated system that scrapes AI and tech news from multiple sources, stores articles in a database with deduplication, and prepares them for summarization and email digest delivery.
+> An intelligent news digest system that automatically scrapes, extracts, ranks, summarizes, and delivers the top AI and tech news stories to your inbox.
 
-## Overview
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![PostgreSQL](https://img.shields.io/badge/postgresql-16-blue.svg)](https://www.postgresql.org/)
+[![LangChain](https://img.shields.io/badge/LangChain-latest-green.svg)](https://langchain.com/)
+[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o--mini-orange.svg)](https://openai.com/)
 
-This project collects recent news articles from various sources (Google News, Times of India, tech blogs like OpenAI, Anthropic, TechCrunch, etc.), stores them in a PostgreSQL database, and eliminates duplicates. The goal is to build a daily news digest system that extracts, ranks, summarizes, and emails the most relevant AI/tech news.
+## Features
+
+- **Automated News Scraping** - Collects articles from multiple sources (Times of India, TechCrunch, Anthropic, The Verge, Hacker News)
+- **Smart Content Extraction** - Bypasses Cloudflare protection and extracts full article text with 75%+ success rate
+- **Intelligent Selection** - Ranks and selects top 10 articles using diversity-aware algorithms
+- **AI-Powered Summaries** - Generates concise one-liners and bullet points using OpenAI GPT-4o-mini
+- **Email Delivery** - Sends HTML digests with plain text fallback
+- **LangGraph Pipeline** - Unified workflow with checkpointing and observability
+- **Automatic Cleanup** - Removes articles older than 18 hours to prevent database bloat
+- **Robust Error Handling** - Exponential backoff, retry logic, and domain skiplists
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Architecture](#architecture)
+- [How It Works](#how-it-works)
+- [Project Structure](#project-structure)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Quick Start
 
 ### Prerequisites
-- Docker and Docker Compose
-- Python 3.11+ with `uv` package manager
 
-### Setup
+- **Docker** and **Docker Compose** installed
+- **Python 3.11+** with [`uv`](https://github.com/astral-sh/uv) package manager
+- **OpenAI API key** ([Get one here](https://platform.openai.com/api-keys))
+- **Gmail account** with App Password (for email sending)
 
-1. **Start the PostgreSQL database:**
+### Installation
+
+1. **Clone the repository**
    ```bash
-   cd docker
-   docker-compose up -d
+   git clone https://github.com/yourusername/AI-News-summarizer.git
+   cd AI-News-summarizer
    ```
 
-2. **Initialize the database:**
+2. **Set up environment variables**
+
+   Create `.env` file in the project root:
+   ```bash
+   # OpenAI API
+   OPENAI_API_KEY=your-openai-api-key
+
+   # SMTP (Gmail example)
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=465
+   SMTP_USER=your-email@gmail.com
+   SMTP_PASS=your-gmail-app-password
+   FROM_EMAIL=your-email@gmail.com
+   TO_EMAIL=recipient@example.com
+   ```
+
+   Create `docker/.env` for database credentials:
+   ```bash
+   POSTGRES_DB=newsdb
+   POSTGRES_USER=news
+   POSTGRES_PASSWORD=your-secure-password
+   POSTGRES_PORT=5433
+   ```
+
+3. **Start the PostgreSQL database**
+   ```bash
+   docker compose -f docker/docker-compose.yml up -d
+   ```
+
+4. **Initialize the database**
    ```bash
    uv run python scripts/init_db.py
    ```
 
-3. **Run the complete pipeline:**
+5. **Run the complete pipeline**
    ```bash
-   # Step 1: Scrape articles from the last 10 hours
-   uv run python -m scripts.ingest_once 10
-
-   # Step 2: Extract content from scraped articles
-   uv run python -m scripts.extract_once 10 80
-
-   # Step 3: Check results
-   uv run python -m scripts.analyze_extractions 10
+   # Scrape, extract, rank, summarize, and send digest for last 10 hours
+   uv run python scripts/run_graph.py 10
    ```
-## Project Structure
+
+That's it! You should receive a news digest email within a few minutes.
+
+## Architecture
+
+### System Overview
 
 ```
-├── app/
-│   ├── scrapers/           # News scraping modules
-│   │   ├── googlenews.py   # Google News RSS scraper
-│   │   ├── timesofindia.py # Times of India web scraper
-│   │   └── techblogs.py    # Tech blog scrapers (OpenAI, Anthropic, etc.)
-│   ├── db/
-│   │   ├── models.py       # SQLAlchemy database models
-│   │   └── database.py     # Database connection and session management
-│   └── repositories/
-│       └── articles_repo.py # Database operations for articles
-├── scripts/
-│   ├── run_scrapers.py     # Run all scrapers with time filter
-│   ├── ingest_once.py      # Scrape and save to database
-│   └── init_db.py          # Initialize database tables
-└── docker/
-    ├── docker-compose.yml  # PostgreSQL container setup
-    └── .env                # Database credentials
+┌─────────────────────────────────────────────────────────────────┐
+│                     AI News Summarizer Pipeline                  │
+└─────────────────────────────────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  1. INGEST                                                       │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
+│  │  TOI     │  │TechCrunch│  │ Anthropic│  │  HackerN │       │
+│  │ Scraper  │  │   RSS    │  │   Blog   │  │   News   │       │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘       │
+│       └─────────────┴─────────────┴──────────────┘             │
+│                       │                                          │
+│                       ▼                                          │
+│              ┌────────────────┐                                 │
+│              │   PostgreSQL   │  ← UPSERT with deduplication    │
+│              │   (Articles)   │                                 │
+│              └────────┬───────┘                                 │
+└───────────────────────┼─────────────────────────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  2. EXTRACT                                                      │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  For each article URL:                                   │   │
+│  │  • Try Cloudscraper (Cloudflare bypass)                 │   │
+│  │  • Fallback to requests with browser headers            │   │
+│  │  • Extract text with Trafilatura                        │   │
+│  │  • Retry with exponential backoff (max 3 attempts)      │   │
+│  │  • Skip known-bad domains                               │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                       │                                          │
+│                       ▼                                          │
+│              ┌────────────────┐                                 │
+│              │ Articles with  │                                 │
+│              │  content_text  │                                 │
+│              └────────┬───────┘                                 │
+└───────────────────────┼─────────────────────────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  3. SELECT                                                       │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  Ranking Algorithm:                                      │   │
+│  │  1. Score by: recency, keywords, source, length         │   │
+│  │  2. Top 5 per source (avoid bias)                       │   │
+│  │  3. Remove duplicate headlines                          │   │
+│  │  4. Pick top 10 overall                                 │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                       │                                          │
+│                       ▼                                          │
+│              ┌────────────────┐                                 │
+│              │  Top 10 IDs    │                                 │
+│              └────────┬───────┘                                 │
+└───────────────────────┼─────────────────────────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  4. SUMMARIZE                                                    │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  For each selected article:                             │   │
+│  │  • Send title + content to OpenAI GPT-4o-mini           │   │
+│  │  • Generate structured output:                          │   │
+│  │    - one_liner: "One sentence summary"                  │   │
+│  │    - bullets: ["Point 1", "Point 2", "Point 3"]         │   │
+│  │  • Validate with Pydantic                               │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                       │                                          │
+│                       ▼                                          │
+│              ┌────────────────┐                                 │
+│              │   Summaries    │                                 │
+│              │  {id: summary} │                                 │
+│              └────────┬───────┘                                 │
+└───────────────────────┼─────────────────────────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  5. PERSIST DIGEST                                               │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  • Create digest record (window_start, window_end)      │   │
+│  │  • Link articles with summaries                         │   │
+│  │  • Assign ranks (1-10)                                  │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                       │                                          │
+│                       ▼                                          │
+│              ┌────────────────┐                                 │
+│              │  Digest in DB  │                                 │
+│              └────────┬───────┘                                 │
+└───────────────────────┼─────────────────────────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  6. EMAIL DELIVERY (not integrated in graph yet)                │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  • Render digest as HTML + plain text                   │   │
+│  │  • Build multipart/alternative email                    │   │
+│  │  • Send via SMTP (Gmail App Password)                   │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                       │                                          │
+│                       ▼                                          │
+│              ┌────────────────┐                                 │
+│              │  📧 Inbox      │                                 │
+│              └────────┬───────┘                                 │
+└───────────────────────┼─────────────────────────────────────────┘
+                        │
+                        ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  7. CLEANUP                                                      │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  • Delete articles older than 18 hours                  │   │
+│  │  • Delete old digests and digest_items                  │   │
+│  │  • Keep database lean                                   │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Phase 1: Foundation (Completed)
+### LangGraph Pipeline
 
-### Step 1: Database Setup
-**Objective:** Set up PostgreSQL in Docker with proper configuration and health checks.
-
-**What was done:**
-- Created a `.env` file in the `docker/` folder to store database credentials (name, user, password, port)
-- Configured Docker Compose to run PostgreSQL with health checks
-- Changed the default port mapping (5432 → custom port) to avoid conflicts
-- Verified the database is accessible using `psql` with a test query (`SELECT now();`)
-
-**Analogy:**
-- **Postgres** = a filing cabinet for news items
-- **Docker** = a sealed appliance that contains the filing cabinet
-- **Healthcheck** = the green "ready" LED
-- **`SELECT now()` test** = pressing the "self-test" button
-
-**References:**
-- [Docker Compose Environment Variables](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)
-- [PostgreSQL Official Docker Image](https://hub.docker.com/_/postgres)
-
----
-
-### Step 2: Database Schema Design
-**Objective:** Design and create database tables for articles, digests, and their relationships.
-
-**Tables Created:**
-1. **`articles`** - Stores scraped articles with unique URLs
-   - `id`, `title`, `url` (UNIQUE), `source`, `category`, `scraped_at`, `content_text`, etc.
-2. **`digests`** - Stores each digest run (e.g., "last 10 hours")
-   - `id`, `created_at`, `summary`, etc.
-3. **`digest_items`** - Links digests to selected articles with per-article summaries
-   - `digest_id`, `article_id`, `summary`, `rank`
-
-**Why Deduplication Matters:**
-- Made `articles.url` UNIQUE to prevent storing the same link twice
-- If Google News and TechBlogs both return the same article, only one row is stored
-- Example: If `https://example.com/story` appears at 9:30 AM and again at 10:00 AM, the UNIQUE constraint blocks the duplicate
-
-**File Structure:**
-- **`models.py`** - Defines what the data looks like (SQLAlchemy models)
-- **`database.py`** - Handles how to connect to the DB (Engine, sessions, `create_all()`)
-- This separation keeps data models independent from connection logic
-
-**References:**
-- [PostgreSQL Constraints Documentation](https://www.postgresql.org/docs/current/ddl-constraints.html)
-- [SQLAlchemy Engines and Connections](https://docs.sqlalchemy.org/en/latest/core/connections.html)
-
----
-
-### Step 3: Article Ingestion with Deduplication
-**Objective:** Save scraped articles into the database while preventing duplicates.
-
-**How It Works:**
-1. Scrapers return a list of articles (title, URL, source, etc.)
-2. **Batch deduplication** - Remove duplicate URLs within the same scrape run
-3. **Database UPSERT** - Use PostgreSQL's `ON CONFLICT DO UPDATE` to handle duplicates
-   - If the URL exists, update the existing row
-   - If the URL is new, insert a new row
-
-**Why We Need Both Deduplication Steps:**
-- **Batch dedupe:** The same URL can appear twice in one scrape run (e.g., different categories)
-- **UPSERT:** A URL scraped yesterday might appear again today from a different source
-- Together they ensure only ONE row per unique URL in the database
-
-**Example Flow:**
-```
-Google News returns URL=A, URL=B
-TechBlogs returns URL=A, URL=C
-
-→ Batch dedupe keeps: A (first occurrence), B, C
-→ UPSERT ensures only one DB row exists for A
-```
-
-**Non-Technical Explanation:**
-> "We save all news links in a small database and keep only one copy of each link so you don't get repeated stories in your email."
-
-**Why This Is the Foundation:**
-Everything next depends on this database:
-- **Extraction** - Fills `content_text` for each article
-- **Ranking** - Picks top articles from the database
-- **Summarization** - Reads article text and generates summaries
-- **Email Delivery** - Sends the final digest
-- **Cleanup** - Deletes articles older than 18 hours
-
-**References:**
-- [PostgreSQL INSERT with ON CONFLICT](https://www.postgresql.org/docs/current/sql-insert.html)
-- [UPSERT with UNIQUE Constraints](https://dba.stackexchange.com/questions/315039/)
-
----
-
-## Scrapers
-
-### News Sources
-
-#### Google News (`googlenews.py`)
-- Fetches recent headlines across categories using RSS feeds
-- Filters articles to the last N hours based on publish time
-- Categories: Technology, Business, World, Science
-
-#### Times of India (`timesofindia.py`)
-- Scrapes Times of India sections via web scraping
-- Filters by "time ago" text (e.g., "2 hours ago")
-- Sections: India, World, Business, Tech
-
-#### Tech Blogs (`techblogs.py`)
-- **OpenAI** - News RSS feed (`https://openai.com/news/rss.xml`)
-- **Anthropic** - Web scraping of news page
-- **TechCrunch AI** - RSS feed for AI category
-- **The Verge** - Tech news RSS feed
-- **Hacker News** - Front page scraping
-
-### Running Scrapers
-
-```bash
-# Test all scrapers (fetch last 24 hours)
-uv run python app/scrapers/test_scrapers.py all
-
-# Save results to JSON file
-uv run python app/scrapers/test_scrapers.py all --save
-
-# Fetch and save to database (last 10 hours)
-uv run python scripts/ingest_once.py 10
-```
-
----
-
-## Database Schema
-
-### Articles Table
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | INTEGER | Primary key |
-| `url` | TEXT | Article URL (UNIQUE) |
-| `title` | TEXT | Article headline |
-| `source` | TEXT | Source name (e.g., "OpenAI", "Google News") |
-| `category` | TEXT | Article category |
-| `scraped_at` | TIMESTAMP | When the article was scraped |
-| `content_text` | TEXT | Extracted article content (nullable) |
-
-### Digests Table
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | INTEGER | Primary key |
-| `created_at` | TIMESTAMP | Digest creation time |
-| `summary` | TEXT | Overall digest summary (nullable) |
-
-### Digest Items Table
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | INTEGER | Primary key |
-| `digest_id` | INTEGER | Foreign key to digests |
-| `article_id` | INTEGER | Foreign key to articles |
-| `summary` | TEXT | Per-article summary |
-| `rank` | INTEGER | Article ranking in digest |
-
----
-
-## Phase 2: Content Extraction (Completed)
-
-**Objective:** Extract full article text from URLs with robust error handling.
-
-**Status:** **Working!** Successfully extracting ~75% of articles from enabled sources.
-
-### Results
-
-**Success Metrics:**
-- **Overall Success Rate:** 73% (58 articles extracted from 79 scraped)
-- **Times of India:** 100% success (25/25 articles)
-- **Anthropic Blog:** 100% success (10/10 articles)
-- **The Verge:** 100% success (10/10 articles)
-- **TechCrunch:** 100% success (4/4 articles)
-- **Hacker News Links:** ~60% success (9/16 articles)
-
-### How It Works
-
-**For Cloudflare-Protected Sites** (Times of India, Anthropic, The Verge, TechCrunch):
-1. Detect Cloudflare protection
-2. Use `cloudscraper` library to bypass protection (mimics Chrome browser)
-3. Extract article text with Trafilatura
-4. Save to database with `extraction_status = "ok"`
-
-**For Standard Sites** (Hacker News links, BBC, GitHub, etc.):
-1. Fetch HTML with browser-like headers
-2. Extract article text with Trafilatura
-3. Retry with exponential backoff if fails (3 attempts)
-4. Save to database
-
-### Quick Commands
-
-```bash
-# Analyze extraction success/failure rates
-uv run python scripts/analyze_extractions.py 24
-
-# Extract content from articles (last 24 hours, batch size 50)
-uv run python scripts/extract_once.py 24 50
-
-# Check extracted content in database
-uv run python scripts/check_db_content.py 24
-```
-
-### Key Features
-- Cloudscraper integration for Cloudflare bypass
-- Browser-like headers to avoid bot detection
-- Retry mechanism with exponential backoff (3 attempts)
-- Detailed logging of every extraction attempt
-- Domain-level success/failure analytics
-- Google News scraper disabled (redirect URLs don't work)
-
-
-## Phase 3: Ranking & Selection (Next)
-
-**Objective:** Score and select top 10 articles for summarization using diversity-aware ranking.
-
-### Approach: Diversity-Aware Re-Ranking
-
-After extraction, we need to select which articles are worth summarizing and emailing. The approach:
-
-1. **Scoring** - Score each article using simple signals:
-   - Recency (newer = higher score)
-   - Keyword boosts (AI, ML, LLM, etc.)
-   - Source importance
-   - Content length
-
-2. **Classification** - Classify articles into topic buckets:
-   - Technology
-   - Finance/Business
-   - World/Politics
-   - Other
-
-3. **Top-N per Source** - Shortlist Top 5 articles per source to avoid source bias
-
-4. **Deduplication** - Remove near-identical headlines using similarity matching
-
-5. **Topic Mix Enforcement** - Ensure balanced coverage:
-   - Prevent "all tech" digests on heavy tech-news days
-   - Balance: Tech + Finance + World
-   - Backfill with best remaining if bucket is weak
-
-6. **Final Top 10** - Select final 10 articles for summarization
-
-### Why This Approach?
-
-**Problem:** Without selection, you'd either:
-- (a) Send too many stories (overwhelming)
-- (b) Waste LLM time summarizing low-value/duplicate items
-
-**Solution:** Diversity-aware re-ranking
-- First rank by relevance (recency, keywords, source)
-- Then re-rank to avoid repetition and increase topic coverage
-- Same approach used in search/recommendation systems
-
-**Non-Technical Explanation:**
-> "I collect many news links, then use simple rules to pick the 10 most important and recent stories, while making sure you get a balanced set (some tech, some finance, some world news) and not 10 versions of the same headline. Then we summarize those 10 and email them."
-
-### References
-- [Diversity-Aware Ranking (OHARS)](https://ceur-ws.org/Vol-2758/OHARS-paper5.pdf)
-- [Relevance vs Diversity in Ranking (ArXiv)](https://arxiv.org/pdf/2204.00539)
-
----
-
-## Phase 4: LangGraph Pipeline Integration (Completed)
-
-### Step 6: Building the State Graph
-
-**Objective:** Transform individual scripts into a unified workflow graph that manages state and enables observability.
-
-**What Changed:**
-Instead of running 3 separate scripts manually:
-```bash
-uv run python scripts/ingest_once.py 10
-uv run python scripts/extract_once.py 10 80
-uv run python scripts/select_top.py 10
-```
-
-We now run a single command:
-```bash
-uv run python scripts/run_graph.py 10
-```
-
-**How It Works:**
-
-1. **State Management** ([`app/graph/state.py`](app/graph/state.py))
-   - Defines `NewsState` TypedDict with all pipeline data
-   - State flows through the graph like a clipboard passed between workers
-   - Each node reads current state and returns updates (patches)
-   - Schema prevents typos and documents what data exists
-
-2. **Graph Construction** ([`app/graph/build_graph.py`](app/graph/build_graph.py))
-   - Each pipeline step becomes a **node** (function)
-   - **Edges** define execution order (ingest → extract → select)
-   - `StateGraph(NewsState)` enforces type safety
-   - `compile()` produces a runnable application
-
-3. **Checkpointing & Persistence**
-   - `InMemorySaver()` saves state snapshots at each step
-   - Enables debugging: see exactly what happened at each node
-   - Enables time-travel: replay or resume from any checkpoint
-   - Grouped by `thread_id` for run isolation
-
-**Graph Flow:**
-```
-START → ingest_node → extract_node → select_node → END
-         (scrape)      (extract)       (rank)
-```
-
-Each node:
-- Receives current state
-- Performs its task
-- Returns state updates (e.g., `{"article_ids": [1,2,3]}`)
-- Graph merges updates automatically
-
-**Why This Matters:**
-
-| Manual Scripts | LangGraph Pipeline |
-|----------------|-------------------|
-| Run 3 commands sequentially | Run 1 command |
-| No visibility between steps | Full state snapshots |
-| Hard to debug failures | See exactly where it failed |
-| Can't resume | Can resume from checkpoint |
-| No audit trail | Complete execution history |
-
-**Analogy:**
-> "Built an assembly line: the **graph** is the flowchart, the **state** is the clipboard that moves with each item, and **checkpoints** are saved progress so we don't restart from zero if something breaks."
-
-**References:**
-- [LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
-- [LangGraph Time-Travel](https://docs.langchain.com/oss/python/langgraph/use-time-travel)
-
----
-
-### Step 7: LLM-Powered Summarization & Digest Generation (Completed)
-
-**Objective:** Add AI-powered summarization and persist digests to the database using OpenAI API with structured output.
-
-**What We Built:**
-
-#### 1. Summarization Service ([`app/services/summarizer.py`](app/services/summarizer.py))
-
-Uses OpenAI's API with **structured output** to generate consistent summaries:
+The system uses LangGraph to orchestrate the workflow as a state machine:
 
 ```python
-class ArticleSummary(BaseModel):
-    one_liner: str     # Single sentence summary
-    bullets: list[str] # 3 key bullet points
+START → ingest → extract → select → summarize → persist_digest → cleanup → END
+         ↓         ↓         ↓          ↓             ↓              ↓
+      articles  content   top 10    summaries    digest_id    cleanup_stats
+```
+
+Each node receives the current state, performs its task, and returns updates. The state is checkpointed at each step for observability and debugging.
+
+## How It Works
+
+### 1. News Scraping (Ingest)
+
+The system scrapes news from multiple sources:
+
+- **Times of India** - Web scraping with category filtering (Technology, Business, Politics)
+- **TechCrunch AI** - RSS feed for AI category
+- **Anthropic Blog** - Web scraping with Cloudscraper
+- **The Verge** - RSS feed for tech news
+- **Hacker News** - Front page scraping
+- **OpenAI Blog** - RSS feed
+
+**Deduplication:**
+- URLs are unique across sources
+- If the same article appears from multiple sources, only one copy is stored
+- Batch deduplication removes duplicates within a single scrape run
+- Database UPSERT (`ON CONFLICT DO UPDATE`) handles duplicates across runs
+
+### 2. Content Extraction
+
+Extracts full article text from URLs:
+
+**Cloudflare Bypass:**
+- Detects Cloudflare-protected sites (Times of India, Anthropic, The Verge)
+- Uses `cloudscraper` library to mimic Chrome browser
+
+**Retry Logic:**
+- Max 3 attempts per article
+- Exponential backoff: 5 min → 30 min
+- After 3 failures: mark as permanently failed
+
+**Domain Skiplist:**
+- Radio sites (wol.fm)
+- Social media (twitter.com, reddit.com)
+- Video content (youtube.com)
+- Sites with 403 errors (retool.com)
+
+**Success Rate:** ~75% overall (100% for major news sites)
+
+### 3. Ranking & Selection
+
+Selects top 10 articles using diversity-aware ranking:
+
+**Scoring Factors:**
+- **Recency** - Newer articles get higher scores
+- **Keywords** - Boost for AI, ML, LLM, Claude, GPT, etc.
+- **Source importance** - Prioritize quality sources
+- **Content length** - Minimum threshold for quality
+
+**Diversity Enforcement:**
+- Top 5 per source (prevents source bias)
+- Removes duplicate headlines (fuzzy matching)
+- Ensures balanced coverage across topics
+
+### 4. AI Summarization
+
+Uses OpenAI GPT-4o-mini with structured output:
+
+**Input:**
+```
+Title: [Article Title]
+Content: [First 4000 chars of article]
+```
+
+**Output (Pydantic validated):**
+```python
+{
+  "one_liner": "One sentence summary of the article",
+  "bullets": [
+    "Key point 1",
+    "Key point 2",
+    "Key point 3"
+  ]
+}
 ```
 
 **Why Structured Output?**
-- Guarantees consistent format (always 1 one-liner + 3 bullets)
-- Type-safe: Pydantic validates the response
-- No need to parse messy text with regex
+- Guaranteed consistent format
+- Type-safe with Pydantic validation
+- No need for regex parsing
 
-**Implementation Details:**
-- Model: `gpt-4o-mini` (fast and cost-effective)
-- Temperature: 0.3 (consistent but not robotic)
-- Input: Article title + full content text
-- Output: Validated `ArticleSummary` object
+### 5. Email Delivery
 
-**Error Handling:**
-- Network failures: Automatic retry with exponential backoff
-- Rate limits: Respects OpenAI rate limit headers
-- Invalid responses: Pydantic validation catches schema mismatches
-- Empty content: Gracefully handles articles with no text
+Sends beautiful HTML emails with plain text fallback:
 
-#### 2. Digest Repository ([`app/services/digest_repo.py`](app/services/digest_repo.py))
+**HTML Version:**
+- Clickable links to original articles
+- Source attribution
+- Clean, readable formatting
 
-Manages digest creation and storage:
+**Plain Text Version:**
+- Fallback for older email clients
+- Accessibility-friendly
 
-**Functions:**
-- `create_digest(hours)` - Creates new digest record with time window
-- `add_items(digest_id, items)` - Links articles to digest with summaries
-- `fetch_articles(ids)` - Retrieves articles from database
+**SMTP Configuration:**
+- Gmail App Password recommended
+- SSL/TLS encryption (port 465)
+- Multipart/alternative format
 
-**Database Schema:**
-```sql
-digests (id, window_start, window_end, created_at)
-  ↓ (1-to-many)
-digest_items (digest_id, article_id, rank, item_summary)
+### 6. Automatic Cleanup
+
+Deletes data older than 18 hours:
+- Prevents database bloat
+- Removes stale articles
+- Keeps only recent digests
+
+## Project Structure
+
+```
+AI-News-summarizer/
+│
+├── app/
+│   ├── scrapers/              # News scraping modules
+│   │   ├── googlenews.py      # Google News RSS
+│   │   ├── timesofindia.py    # Times of India web scraper
+│   │   ├── techblogs.py       # Tech blog scrapers
+│   │   └── run_scrapers.py    # Scraper orchestration
+│   │
+│   ├── services/              # Business logic
+│   │   ├── articles_repo.py   # Article database operations
+│   │   ├── extractor.py       # Content extraction
+│   │   ├── extract_repo.py    # Extraction with retry logic
+│   │   ├── ranker.py          # Article scoring
+│   │   ├── select_repo.py     # Top-N selection
+│   │   ├── summarizer.py      # LLM summarization
+│   │   ├── digest_repo.py     # Digest database operations
+│   │   ├── email_renderer.py  # Email formatting
+│   │   ├── email_message_builder.py  # Email construction
+│   │   ├── email_sender.py    # SMTP delivery
+│   │   ├── cleanup_repo.py    # Data retention
+│   │   └── database.py        # DB connection management
+│   │
+│   ├── graph/                 # LangGraph pipeline
+│   │   ├── state.py           # State schema
+│   │   └── build_graph.py     # Graph construction
+│   │
+│   └── db/
+│       └── models.py          # SQLAlchemy models
+│
+├── scripts/                   # Utility scripts
+│   ├── init_db.py             # Initialize database
+│   ├── run_graph.py           # Run full pipeline
+│   ├── ingest_once.py         # Scrape articles
+│   ├── extract_once.py        # Extract content
+│   ├── select_top.py          # Select top articles
+│   ├── send_digest_email.py   # Send digest
+│   ├── send_test_email.py     # Test SMTP
+│   ├── preview_email.py       # Preview email
+│   ├── cleanup_once.py        # Manual cleanup
+│   └── debug_email_send.py    # SMTP debugging
+│
+├── docker/
+│   ├── docker-compose.yml     # PostgreSQL container
+│   └── .env                   # Database credentials
+│
+├── .env                       # API keys & SMTP config
+├── README.md                  # This file
+├── IMPLEMENTATION.md          # Detailed implementation guide
+└── pyproject.toml             # Python dependencies
 ```
 
-#### 3. Updated Graph Pipeline
+## Configuration
 
-**New Nodes:**
-```python
-def summarize_node(state):
-    # Fetch selected articles from DB
-    # Generate summaries using OpenAI
-    # Return summaries dict: {article_id: summary}
+### Environment Variables
 
-def persist_digest_node(state):
-    # Create new digest in DB
-    # Link articles with their summaries
-    # Return digest_id
-```
-
-**Complete Graph Flow:**
-```
-START
-  ↓
-ingest_node (scrape articles)
-  ↓
-extract_node (extract content with retry logic)
-  ↓
-select_node (rank & pick top 10)
-  ↓
-summarize_node (LLM generates summaries)
-  ↓
-persist_digest_node (save to database)
-  ↓
-END
-```
-
-**Updated State Schema:**
-```python
-class NewsState(TypedDict, total=False):
-    window_hours: int
-    article_ids: List[int]
-    selected_ids: List[int]
-    summaries: Dict[int, Dict[str, Any]]  # NEW
-    digest_id: int                         # NEW
-```
-
-#### 4. Challenges & Solutions
-
-**Challenge 1: Infinite Extraction Retry Loop**
-
- **Problem:** Articles failing extraction were retried infinitely, spamming logs:
-```
-✗ Failed: Trafilatura extraction failed for wol.fm
-✗ Failed: Trafilatura extraction failed for wol.fm
-✗ Failed: Trafilatura extraction failed for wol.fm
-... (forever)
-```
-
-**Solution:** Implemented retry logic with exponential backoff
-- Added columns: `extraction_attempts`, `next_extract_at`
-- Max 3 attempts per article
-- Backoff delays: 5 min → 30 min
-- After 3 failures: permanently mark as `failed`
-
-**Code Changes:**
-```python
-# app/services/extract_repo.py
-if article.extraction_attempts < MAX_EXTRACTION_ATTEMPTS:
-    backoff_minutes = 5 * (6 ** (article.extraction_attempts - 1))
-    article.next_extract_at = now + timedelta(minutes=backoff_minutes)
-else:
-    article.extraction_status = "failed"  # Give up
-```
-
-**Challenge 2: Some Domains Always Fail**
-
- **Problem:** Certain domains (radio sites, minimal blogs, 403 errors) always fail extraction
-
-**Solution:** Created domain skiplist
-```python
-SKIP_DOMAINS = {
-    "wol.fm",           # Radio/audio content
-    "bostondynamics.com", # JS-heavy
-    "retool.com",       # 403 forbidden
-    "twitter.com",      # Social media
-}
-```
-Articles from these domains are marked as `skipped` immediately.
-
-**Challenge 3: Cloudscraper Not Used as Fallback**
-
- **Problem:** Logs showed `method: requests` even for sites that need Cloudscraper
-
-**Solution:** Always try Cloudscraper on final retry attempt
-```python
-should_try_cloudscraper = (
-    (domain in CLOUDFLARE_PROTECTED_DOMAINS and attempt == 0) or
-    (attempt == max_retries - 1)  # Last resort fallback
-)
-```
-
-**Challenge 4: Missing State Fields**
-
- **Error:**
-```
-KeyError: 'summaries'
-During task with name 'persist_digest' and id '...'
-```
-
-**Solution:** Added missing fields to `NewsState` TypedDict
-```python
-summaries: Dict[int, Dict[str, Any]]
-digest_id: int
-```
-
-**Challenge 5: Times of India Technology 404**
-
- **Problem:** URL `/business/india-business/tech` returned 404
-
-**Solution:** Updated to correct URL
-```python
-'technology': '/technology/tech-news'  # Fixed
-```
-
-#### 5. Final Results
-
-**Example Graph Run:**
+**Main `.env` file:**
 ```bash
+# OpenAI API
+OPENAI_API_KEY=sk-...
+
+# Database (must match docker/.env)
+DATABASE_URL=postgresql://news:password@localhost:5433/newsdb
+
+# SMTP Configuration
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-gmail-app-password
+FROM_EMAIL=your-email@gmail.com
+TO_EMAIL=recipient@example.com
+```
+
+**`docker/.env` file:**
+```bash
+POSTGRES_DB=newsdb
+POSTGRES_USER=news
+POSTGRES_PASSWORD=your-secure-password
+POSTGRES_PORT=5433
+```
+
+### Gmail App Password Setup
+
+1. Enable 2-Step Verification on your Google Account
+2. Go to [App Passwords](https://myaccount.google.com/apppasswords)
+3. Generate a new app password for "Mail"
+4. Use this password in `SMTP_PASS` (not your regular Gmail password)
+
+## Usage
+
+### Running the Complete Pipeline
+
+```bash
+# Run the full pipeline for last 10 hours
 uv run python scripts/run_graph.py 10
+
+# This will:
+# 1. Scrape articles from all sources
+# 2. Extract content with retry logic
+# 3. Rank and select top 10
+# 4. Generate AI summaries
+# 5. Save digest to database
+# 6. Clean up old data (18+ hours)
 ```
 
-**Output:**
-```
-✓ Scraped 84 articles (45 from TOI, 39 from Tech Blogs)
-✓ Extracted content from 122 articles (38.9% success rate)
-✓ Selected 10 top articles
-✓ Generated 10 summaries via OpenAI
-✓ Created digest #3 with all items
-
-Final State:
-{
-  'window_hours': 10,
-  'raw_count': 84,
-  'article_ids': [910, 911, ...],
-  'selected_ids': [119, 120, 125, ...],
-  'summaries': {
-    910: {
-      'one_liner': 'AI-driven tech investments could trigger inflation...',
-      'bullets': ['...', '...', '...']
-    },
-    ...
-  },
-  'digest_id': 3
-}
-```
-
-**Database State:**
-```sql
-SELECT COUNT(*) FROM digests;        -- 3 digests created
-SELECT COUNT(*) FROM digest_items;   -- 30 articles summarized (10 per digest)
-SELECT COUNT(*) FROM articles WHERE extraction_status = 'ok';  -- 122 successful
-```
-
-#### 6. Monitoring & Maintenance
-
-**Check Extraction Status:**
+**Note:** Email sending is currently a separate step:
 ```bash
-uv run python scripts/check_extraction_status.py
+# After running the graph, send the digest:
+uv run python scripts/send_digest_email.py <digest_id>
 ```
 
-**Cleanup Failed Attempts:**
+### Individual Commands
+
+**Initialize Database:**
 ```bash
-uv run python scripts/cleanup_and_migrate.py
+uv run python scripts/init_db.py
 ```
 
-**View Retry Queue:**
-```sql
-SELECT url, extraction_attempts, next_extract_at
-FROM articles
-WHERE next_extract_at IS NOT NULL
-ORDER BY next_extract_at;
+**Scrape Articles:**
+```bash
+# Scrape last 24 hours
+uv run python scripts/ingest_once.py 24
 ```
 
-**References:**
-- [LangChain Structured Output](https://docs.langchain.com/oss/python/langchain/structured-output)
-- [LangChain OpenAI Integration](https://docs.langchain.com/oss/python/integrations/chat/openai)
-- [SQLAlchemy ORM Quickstart](https://docs.sqlalchemy.org/en/20/orm/quickstart.html)
-- [LangGraph Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
-- [Exponential Backoff Best Practices](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/)
+**Extract Content:**
+```bash
+# Extract last 24 hours, batch size 80
+uv run python scripts/extract_once.py 24 80
+```
+
+**Select Top Articles:**
+```bash
+# Select top 10 from last 10 hours
+uv run python scripts/select_top.py 10
+```
+
+**Send Email:**
+```bash
+# Preview first (saves to .eml file)
+uv run python scripts/preview_email.py <digest_id>
+
+# Send to recipient
+uv run python scripts/send_digest_email.py <digest_id>
+
+# Debug SMTP issues
+uv run python scripts/debug_email_send.py <digest_id>
+```
+
+**Cleanup:**
+```bash
+# Delete data older than 18 hours
+uv run python scripts/cleanup_once.py
+```
+
+### Database Commands
+
+**Check article counts:**
+```bash
+docker compose -f docker/docker-compose.yml exec db psql -U news -d newsdb -c \
+  "SELECT COUNT(*) FROM articles;"
+```
+
+**View recent digests:**
+```bash
+docker compose -f docker/docker-compose.yml exec db psql -U news -d newsdb -c \
+  "SELECT id, created_at, window_start, window_end FROM digests ORDER BY created_at DESC LIMIT 5;"
+```
+
+**Check extraction status:**
+```bash
+docker compose -f docker/docker-compose.yml exec db psql -U news -d newsdb -c \
+  "SELECT extraction_status, COUNT(*) FROM articles GROUP BY extraction_status;"
+```
+
+## Development
+
+### Prerequisites
+
+```bash
+# Install uv (fast Python package manager)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies
+uv sync
+```
+
+### Running Tests
+
+```bash
+# Test scrapers
+uv run python app/scrapers/test_scrapers.py all
+
+# Test extraction
+uv run python scripts/analyze_extractions.py 24
+
+# Test email (doesn't send)
+uv run python scripts/preview_email.py <digest_id>
+
+# Test SMTP (sends simple message)
+uv run python scripts/send_test_email.py
+```
+
+### Adding New News Sources
+
+1. Create scraper function in `app/scrapers/techblogs.py` or create new file
+2. Register in `app/scrapers/run_scrapers.py`
+3. Test with `uv run python app/scrapers/test_scrapers.py all --save`
+
+Example:
+```python
+# app/scrapers/techblogs.py
+def scrape_new_source(hours: int = 24) -> list[NewsItem]:
+    # Fetch RSS feed or scrape website
+    # Return list of NewsItem objects
+    pass
+```
+
+### Database Migrations
+
+```bash
+# Add new columns (example)
+uv run python scripts/migrate_add_new_columns.py
+
+# Always backup before migrations!
+docker compose -f docker/docker-compose.yml exec db pg_dump -U news newsdb > backup.sql
+```
+
+## Troubleshooting
+
+### Email Not Arriving
+
+**Symptoms:** SMTP shows success but email doesn't arrive
+
+**Solutions:**
+1. **Check spam/junk folder** - Most likely location
+2. **Check Gmail Promotions tab** - Digest emails often go here
+3. **Verify TO_EMAIL** - Ensure it's correct in `.env`
+4. **Try different recipient** - Test with pure Gmail address
+5. **Check SMTP debug logs:**
+   ```bash
+   uv run python scripts/debug_email_send.py <digest_id>
+   ```
+6. **Look for refused recipients:** Should show `refused: {}`
+
+**For University/Enterprise Email:**
+- Contact IT support if emails are blocked
+- Check for additional spam filtering after Gmail
+
+### Extraction Failing
+
+**Symptoms:** Low extraction success rate (<50%)
+
+**Solutions:**
+1. **Check Cloudscraper installation:**
+   ```bash
+   uv add cloudscraper
+   ```
+2. **Verify domain isn't in skiplist** - Check `app/services/extractor.py`
+3. **Increase retry attempts** - Edit `MAX_EXTRACTION_ATTEMPTS` in `app/services/extract_repo.py`
+4. **Check extraction logs:**
+   ```bash
+   uv run python scripts/check_extraction_status.py
+   ```
+
+### Database Connection Issues
+
+**Symptoms:** `psycopg2.OperationalError: connection refused`
+
+**Solutions:**
+1. **Ensure Docker is running:**
+   ```bash
+   docker compose -f docker/docker-compose.yml ps
+   ```
+2. **Check port mapping:**
+   ```bash
+   # Should show 0.0.0.0:5433->5432/tcp
+   docker compose -f docker/docker-compose.yml ps
+   ```
+3. **Verify DATABASE_URL** matches `docker/.env`
+4. **Restart containers:**
+   ```bash
+   docker compose -f docker/docker-compose.yml restart
+   ```
+
+### LangGraph Errors
+
+**Symptoms:** `KeyError` in state, missing fields
+
+**Solutions:**
+1. **Check state schema** - Ensure all fields in `app/graph/state.py`
+2. **Verify node returns** - Each node must return dict with expected keys
+3. **Check checkpoints** - View full state after run
+
+## Additional Documentation
+
+- **[IMPLEMENTATION.md](IMPLEMENTATION.md)** - Detailed implementation guide with all steps, challenges, and solutions
+- **[API Documentation](https://platform.openai.com/docs)** - OpenAI API reference
+- **[LangGraph Docs](https://docs.langchain.com/oss/python/langgraph)** - LangGraph documentation
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- **[LangChain](https://langchain.com/)** - For LangGraph orchestration framework
+- **[OpenAI](https://openai.com/)** - For GPT-4o-mini API
+- **[Trafilatura](https://trafilatura.readthedocs.io/)** - For article text extraction
+- **[Cloudscraper](https://github.com/VeNoMouS/cloudscraper)** - For Cloudflare bypass
+
+## Contact
+
+For questions or feedback, please open an issue on GitHub.
 
 ---
 
-Step 8
-I implemented **Step 8** by splitting it into 5 safe parts so the pipeline doesn’t break: **compose → send → cleanup → schedule → trace**.
-
-**8.1 (Compose email, don’t send):** I read `digests`, `digest_items`, and `articles` from Postgres and convert them into a single email with **two bodies**: plain text + HTML. I build it using Python’s `EmailMessage` so it becomes a proper **multipart/alternative** email (HTML for modern clients, plain text fallback).
-Example: the text version prints a numbered Top 10 list with bullets + links, and the HTML version renders the same content using `<ol>` and clickable `<a href>` links. I test this by generating a `.eml` preview file and opening it locally before I touch SMTP.
-
-**8.2 (Send email with SMTP):** After the preview looks correct, I add a separate `send_email(msg)` that connects to an SMTP server using `smtplib` and sends the same `EmailMessage` object. This separation is important because it keeps “formatting bugs” and “delivery bugs” independent. ([Python documentation][3])
-Example: I first send a “hello test” email to confirm credentials, then send a real digest by `digest_id`. If I use Gmail, I use a Gmail **App Password** (requires 2-Step Verification) instead of my normal password.
-
-**8.3 (Cleanup / retention):** After a successful send, I run a cleanup function that deletes rows older than **18 hours** (TTL) so the database stays small and the system doesn’t keep infinite history. This runs only after the email succeeds, so I don’t delete data before delivery. I test it by temporarily setting the cutoff very small (like minutes) and verifying counts drop in Postgres. (Also, I fixed an SAWarning by using explicit `select()` in `IN(...)` queries instead of passing a subquery object implicitly.)
-
-**How it fits LangGraph:** I wire these as nodes so the end-to-end flow becomes: `summarize → compose_email → send_email → cleanup`, and I run it with a `thread_id` so checkpoints can persist per run/thread (useful for debugging and resuming).
-
-**References:**
-[1]: https://docs.python.org/3/library/email.message.html "Representing an email message"
-[2]: https://docs.python.org/3/library/email.examples.html "email: Examples"
-[3]: https://docs.python.org/3/library/smtplib.html "smtplib — SMTP protocol client"
-[4]: https://support.google.com/mail/answer/185833?hl=en&utm_source=chatgpt.com "Sign in with app passwords - Gmail Help"
-[5]: https://docs.sqlalchemy.org/en/latest/core/selectable.html "SELECT and Related Constructs — SQLAlchemy 2.0 ..."
-[6]: https://apscheduler.readthedocs.io/en/latest/modules/triggers/cron.html "apscheduler.triggers.cron"
-[7]: https://langfuse.com/integrations/frameworks/langchain "LangChain & LangGraph Integration"
-[8]: https://docs.langchain.com/oss/python/langgraph/persistence "Persistence - Docs by LangChain"
+Built with Claude Sonnet 4.5
