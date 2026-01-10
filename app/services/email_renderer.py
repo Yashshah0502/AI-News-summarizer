@@ -1,6 +1,7 @@
 # app/services/email_renderer.py
 from __future__ import annotations
 
+from datetime import datetime
 from html import escape
 from typing import Tuple, List
 
@@ -29,7 +30,8 @@ def render_digest(digest_id: int) -> Tuple[str, str, str]:
             .order_by(DigestItem.rank)
         ).all()
 
-    subject = f"News Digest (Last 10 Hours) — Top {len(rows)}"
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    subject = f"News Digest (Last 10 Hours) — Top {len(rows)} — {timestamp}"
     window = f"Window: {d.window_start} → {d.window_end}"
 
     # ---------- TEXT ----------

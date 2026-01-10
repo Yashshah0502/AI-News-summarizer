@@ -14,10 +14,12 @@ def send_email(msg: EmailMessage) -> None:
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(host, port, context=context) as server:
             server.login(user, pwd)
-            server.send_message(msg)  # sends to To/Cc/Bcc headers :contentReference[oaicite:1]{index=1}
+            refused = server.send_message(msg)  # sends to To/Cc/Bcc headers :contentReference[oaicite:1]{index=1}
+            print("refused:", refused)
     else:
         # STARTTLS (commonly 587)
         with smtplib.SMTP(host, port) as server:
             server.starttls(context=ssl.create_default_context())
             server.login(user, pwd)
-            server.send_message(msg)
+            refused = server.send_message(msg)
+            print("refused:", refused)

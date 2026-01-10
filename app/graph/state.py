@@ -10,3 +10,4 @@ class NewsState(TypedDict, total=False):
     selected_ids: List[int]
     summaries: Dict[int, Dict[str, Any]]
     digest_id: int
+    cleanup_stats: Dict[str, Any]

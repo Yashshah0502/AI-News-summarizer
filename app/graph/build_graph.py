@@ -69,6 +69,11 @@ def persist_digest_node(state):
     add_items(did, items)
     return {"digest_id": did}
 
+def cleanup_node(state):
+    from app.services.cleanup_repo import cleanup_older_than
+    result = cleanup_older_than(hours=18)
+    return {"cleanup_stats": result}
+
 def build_app():
     g = StateGraph(NewsState)
     g.add_node("ingest", ingest_node)
@@ -76,13 +81,15 @@ def build_app():
     g.add_node("select", select_node)
     g.add_node("summarize", summarize_node)
     g.add_node("persist_digest", persist_digest_node)
+    g.add_node("cleanup", cleanup_node)
 
     g.add_edge(START, "ingest")
     g.add_edge("ingest", "extract")
     g.add_edge("extract", "select")
     g.add_edge("select", "summarize")
     g.add_edge("summarize", "persist_digest")
-    g.add_edge("persist_digest", END)
+    g.add_edge("persist_digest", "cleanup")
+    g.add_edge("cleanup", END)
 
     # InMemorySaver is fine for local dev/testing (not production). :contentReference[oaicite:1]{index=1}
     return g.compile(checkpointer=InMemorySaver())

@@ -627,11 +627,24 @@ ORDER BY next_extract_at;
 ---
 
 Step 8
-**References:**
-8.1
-Concept: generate a multipart email that has plain text + HTML so every email client can render it (HTML if possible, text fallback). 
-Implementation: read digests + digest_items from Postgres, build a subject like News Digest (Last 10 Hours) and a body where each item is: Title + Source + Link + 2–4 bullets.
-https://docs.python.org/3/library/email.examples.html
+I implemented **Step 8** by splitting it into 5 safe parts so the pipeline doesn’t break: **compose → send → cleanup → schedule → trace**.
 
-Step 8.2: Send the email (SMTP)
-https://support.google.com/mail/answer/185833?hl=en
+**8.1 (Compose email, don’t send):** I read `digests`, `digest_items`, and `articles` from Postgres and convert them into a single email with **two bodies**: plain text + HTML. I build it using Python’s `EmailMessage` so it becomes a proper **multipart/alternative** email (HTML for modern clients, plain text fallback).
+Example: the text version prints a numbered Top 10 list with bullets + links, and the HTML version renders the same content using `<ol>` and clickable `<a href>` links. I test this by generating a `.eml` preview file and opening it locally before I touch SMTP.
+
+**8.2 (Send email with SMTP):** After the preview looks correct, I add a separate `send_email(msg)` that connects to an SMTP server using `smtplib` and sends the same `EmailMessage` object. This separation is important because it keeps “formatting bugs” and “delivery bugs” independent. ([Python documentation][3])
+Example: I first send a “hello test” email to confirm credentials, then send a real digest by `digest_id`. If I use Gmail, I use a Gmail **App Password** (requires 2-Step Verification) instead of my normal password.
+
+**8.3 (Cleanup / retention):** After a successful send, I run a cleanup function that deletes rows older than **18 hours** (TTL) so the database stays small and the system doesn’t keep infinite history. This runs only after the email succeeds, so I don’t delete data before delivery. I test it by temporarily setting the cutoff very small (like minutes) and verifying counts drop in Postgres. (Also, I fixed an SAWarning by using explicit `select()` in `IN(...)` queries instead of passing a subquery object implicitly.)
+
+**How it fits LangGraph:** I wire these as nodes so the end-to-end flow becomes: `summarize → compose_email → send_email → cleanup`, and I run it with a `thread_id` so checkpoints can persist per run/thread (useful for debugging and resuming).
+
+**References:**
+[1]: https://docs.python.org/3/library/email.message.html "Representing an email message"
+[2]: https://docs.python.org/3/library/email.examples.html "email: Examples"
+[3]: https://docs.python.org/3/library/smtplib.html "smtplib — SMTP protocol client"
+[4]: https://support.google.com/mail/answer/185833?hl=en&utm_source=chatgpt.com "Sign in with app passwords - Gmail Help"
+[5]: https://docs.sqlalchemy.org/en/latest/core/selectable.html "SELECT and Related Constructs — SQLAlchemy 2.0 ..."
+[6]: https://apscheduler.readthedocs.io/en/latest/modules/triggers/cron.html "apscheduler.triggers.cron"
+[7]: https://langfuse.com/integrations/frameworks/langchain "LangChain & LangGraph Integration"
+[8]: https://docs.langchain.com/oss/python/langgraph/persistence "Persistence - Docs by LangChain"
