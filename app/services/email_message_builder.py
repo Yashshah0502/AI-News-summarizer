@@ -10,6 +10,10 @@ def build_email_message(subject: str, text_body: str, html_body: str, from_email
     msg["From"] = from_email
     msg["To"] = to_email
 
+    # Add headers to improve deliverability
+    msg["X-Mailer"] = "AI-News-Summarizer"
+    msg["List-Unsubscribe"] = f"<mailto:{from_email}?subject=unsubscribe>"
+
     msg.set_content(text_body)
     msg.add_alternative(html_body, subtype="html")  # creates multipart/alternative :contentReference[oaicite:2]{index=2}
     return msg

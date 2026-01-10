@@ -72,7 +72,12 @@ def extract_missing_content(hours: int = 10, batch_size: int = 30) -> Dict[str, 
                     Article.next_extract_at <= now,
                 )
             )
-            .where(Article.extraction_status != "skipped")
+            .where(
+                or_(
+                    Article.extraction_status.is_(None),
+                    Article.extraction_status != "skipped"
+                )
+            )
             .limit(batch_size)
         )
         rows = session.execute(q).scalars().all()
